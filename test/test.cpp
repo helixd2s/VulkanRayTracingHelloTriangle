@@ -147,6 +147,7 @@ int main() {
         memcpy(indicesBuffer.map(), indices.data(), size);
     }
 
+
     // bottom levels
     vkt::Vector<uint8_t> accelerationStructureBottomScratch = {};
     vkt::Vector<uint8_t> accelerationStructureBottomStorage = {};
@@ -236,10 +237,9 @@ int main() {
 
     // top, instance levels
     vkh::VkAccelerationStructureDeviceAddressInfoKHR deviceAddressInfo = {};
-    deviceAddressInfo = accelerationStructureBottom;
     std::vector<::VkAccelerationStructureInstanceKHR> instances = {
         vkh::VkAccelerationStructureInstanceKHR{
-            .accelerationStructureReference = device->dispatch->GetAccelerationStructureDeviceAddressKHR(&deviceAddressInfo)
+            .accelerationStructureReference = device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureBottom))
         }
     };
     vkt::Vector<vkh::VkAccelerationStructureInstanceKHR> instancesBuffer = {};
@@ -258,6 +258,7 @@ int main() {
         instancesBuffer = vkt::Vector<vkh::VkAccelerationStructureInstanceKHR>(allocation, 0ull, size, sizeof(vkh::VkAccelerationStructureInstanceKHR));
         memcpy(instancesBuffer.map(), instances.data(), size);
     };
+
 
     // top levels
     vkt::Vector<uint8_t> accelerationStructureTopScratch = {};
@@ -341,6 +342,39 @@ int main() {
     };
 
 
+    //
+    VkPipelineLayout rtPipelineLayout = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSetLayout> rtLayouts = { VK_NULL_HANDLE };
+
+    // create descriptor set layout
+    vkh::VsDescriptorSetLayoutCreateInfoHelper descriptorSetLayoutHelper(vkh::VkDescriptorSetLayoutCreateInfo{});
+    descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
+        .binding = 0u,
+        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
+        .descriptorCount = 1u,
+        .stageFlags = pipusage
+    }, vkh::VkDescriptorBindingFlags{});
+    vkh::handleVk(device->dispatch->CreateDescriptorSetLayout(descriptorSetLayoutHelper.format(), nullptr, &rtLayouts[0]));
+
+    // create pipeline layout
+    std::vector<vkh::VkPushConstantRange> rtRanges = { vkh::VkPushConstantRange{.stageFlags = pipusage, .offset = 0u, .size = 16u } };
+    vkh::handleVk(device->dispatch->CreatePipelineLayout(vkh::VkPipelineLayoutCreateInfo{  }.setSetLayouts(rtLayouts).setPushConstantRanges(rtRanges), nullptr, &rtPipelineLayout));
+    std::vector<VkDescriptorSet> rtDescriptorSets = { VK_NULL_HANDLE };
+
+    // create descriptor set
+    vkh::VsDescriptorSetCreateInfoHelper descriptorSetHelper(rtLayouts[0], device->descriptorPool);
+    vkh::VsDescriptorHandle<vkh::VkWriteDescriptorSetInlineUniformBlockEXT> accelerationStructureHandle = descriptorSetHelper.pushDescription(vkh::VkDescriptorUpdateTemplateEntry{
+        .dstBinding = 0u,
+        .descriptorCount = 1u,
+        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
+        .stride = sizeof(vkh::VkWriteDescriptorSetInlineUniformBlockEXT)
+    });
+    std::vector<uint64_t> addresses = {
+        device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureTop))
+    };
+    accelerationStructureHandle->setData(addresses);
+    bool created = false;
+    vkh::AllocateDescriptorSetWithUpdate(device->dispatch, descriptorSetHelper, rtDescriptorSets[0], created);
 
 
 
