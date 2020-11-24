@@ -419,7 +419,7 @@ int main() {
 
     //
     VkPipeline rayTracingPipeline = {};
-    device->dispatch->CreateRayTracingPipelinesKHR(VK_NULL_HANDLE, device->pipelineCache, 1u, &rayTracingPipelineHelper.vkInfo, nullptr, &rayTracingPipeline);
+    vkh::handleVk(device->dispatch->CreateRayTracingPipelinesKHR(VK_NULL_HANDLE, device->pipelineCache, 1u, &rayTracingPipelineHelper.vkInfo, nullptr, &rayTracingPipeline));
 
 
     // TODO: getting native size 
@@ -440,7 +440,7 @@ int main() {
         };
         auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
         sbtBuffer = vkt::Vector<uint8_t>(allocation, 0ull, size, sizeof(uint8_t));
-        device->dispatch->GetRayTracingShaderGroupHandlesKHR(rayTracingPipeline, 0u, rayTracingPipelineHelper.groupCount(), size, sbtBuffer.mapped());
+        vkh::handleVk(device->dispatch->GetRayTracingShaderGroupHandlesKHR(rayTracingPipeline, 0u, rayTracingPipelineHelper.groupCount(), size, sbtBuffer.mapped()));
     };
 
     // TODO: deviceAddress operators
