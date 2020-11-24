@@ -116,8 +116,9 @@ int main() {
     vkt::Vector<glm::vec4> verticesBuffer = {};
 
     {   // vertices
+        auto size = vertices.size() * sizeof(glm::vec4);
         auto bufferCreateInfo = vkh::VkBufferCreateInfo{
-            .size = vertices.size() * sizeof(glm::vec4),
+            .size = size,
             .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
         };
         auto vmaCreateInfo = vkt::VmaMemoryInfo{
@@ -126,13 +127,14 @@ int main() {
             .deviceDispatch = device->dispatch
         };
         auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
-        verticesBuffer = vkt::Vector<glm::vec4>(allocation, 0ull, vertices.size() * sizeof(glm::vec4), sizeof(glm::vec4));
-        memcpy(verticesBuffer.map(), vertices.data(), vertices.size() * sizeof(glm::vec4));
+        verticesBuffer = vkt::Vector<glm::vec4>(allocation, 0ull, size, sizeof(glm::vec4));
+        memcpy(verticesBuffer.map(), vertices.data(), size);
     }
 
     {   // indices
+        auto size = indices.size() * sizeof(uint16_t);
         auto bufferCreateInfo = vkh::VkBufferCreateInfo{
-            .size = indices.size() * sizeof(uint16_t),
+            .size = size,
             .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
         };
         auto vmaCreateInfo = vkt::VmaMemoryInfo{
@@ -141,8 +143,8 @@ int main() {
             .deviceDispatch = device->dispatch
         };
         auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
-        indicesBuffer = vkt::Vector<uint16_t>(allocation, 0ull, indices.size() * sizeof(uint16_t), sizeof(uint16_t));
-        memcpy(indicesBuffer.map(), indices.data(), indices.size() * sizeof(uint16_t));
+        indicesBuffer = vkt::Vector<uint16_t>(allocation, 0ull, size, sizeof(uint16_t));
+        memcpy(indicesBuffer.map(), indices.data(), size);
     }
 
     // bottom levels
@@ -150,7 +152,7 @@ int main() {
     vkt::Vector<uint8_t> accelerationStructureBottomStorage = {};
     VkAccelerationStructureKHR accelerationStructureBottom = VK_NULL_HANDLE;
     {
-        auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR;//VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
 
         vkh::VkAccelerationStructureGeometryKHR geometryInfo = {
             .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
@@ -191,6 +193,20 @@ int main() {
             accelerationStructureBottomStorage = vkt::Vector<uint8_t>(allocation, 0ull, sizes.accelerationStructureSize, sizeof(uint8_t));
         };
 
+        {   // create acceleration structure scratch
+            auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+                .size = sizes.buildScratchSize,
+                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+            };
+            auto vmaCreateInfo = vkt::VmaMemoryInfo{
+                .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+                .instanceDispatch = instance->dispatch,
+                .deviceDispatch = device->dispatch
+            };
+            auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+            accelerationStructureBottomScratch = vkt::Vector<uint8_t>(allocation, 0ull, sizes.buildScratchSize, sizeof(uint8_t));
+        };
+
         // create acceleration structure
         vkh::VkAccelerationStructureCreateInfoKHR accelerationInfo = {};
         accelerationInfo.type = accelerationStructureType;
@@ -199,15 +215,132 @@ int main() {
         // currently, not available (driver or loader bug)
         device->dispatch->CreateAccelerationStructureKHR(accelerationInfo, nullptr, &accelerationStructureBottom);
 
+        //
+        buildInfo.dstAccelerationStructure = accelerationStructureBottom;
+        buildInfo.scratchData = accelerationStructureBottomScratch;
+
+        //
+        vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = {
+            .primitiveCount = primitiveCounts[0]
+        };
+        std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = {
+            &rangesInfo
+        };
+
         // needs command buffer execution
         queue->submitOnce([&](VkCommandBuffer cmd) {
-            //device->dispatch->BuildAccelerationStructuresKHR();
+            device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &buildInfo, rangeInfoPointers.data());
         });
     };
 
-    ////
-    // TODO: Top, Instance Level 
-    ////
+
+    // top, instance levels
+    vkh::VkAccelerationStructureDeviceAddressInfoKHR deviceAddressInfo = {};
+    deviceAddressInfo = accelerationStructureBottom;
+    std::vector<::VkAccelerationStructureInstanceKHR> instances = {
+        vkh::VkAccelerationStructureInstanceKHR{
+            .accelerationStructureReference = device->dispatch->GetAccelerationStructureDeviceAddressKHR(&deviceAddressInfo)
+        }
+    };
+    vkt::Vector<vkh::VkAccelerationStructureInstanceKHR> instancesBuffer = {};
+    {   // instances
+        auto size = instances.size() * sizeof(vkh::VkAccelerationStructureInstanceKHR);
+        auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+            .size = size,
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+        };
+        auto vmaCreateInfo = vkt::VmaMemoryInfo{
+            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .instanceDispatch = instance->dispatch,
+            .deviceDispatch = device->dispatch
+        };
+        auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+        instancesBuffer = vkt::Vector<vkh::VkAccelerationStructureInstanceKHR>(allocation, 0ull, size, sizeof(vkh::VkAccelerationStructureInstanceKHR));
+        memcpy(instancesBuffer.map(), instances.data(), size);
+    };
+
+    // top levels
+    vkt::Vector<uint8_t> accelerationStructureTopScratch = {};
+    vkt::Vector<uint8_t> accelerationStructureTopStorage = {};
+    VkAccelerationStructureKHR accelerationStructureTop = VK_NULL_HANDLE;
+    {
+        auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+        vkh::VkAccelerationStructureGeometryKHR geometryInfo = {
+            .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+            .geometry = {},
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
+        };
+        geometryInfo.geometry = vkh::VkAccelerationStructureGeometryInstancesDataKHR{
+            .data = instancesBuffer.deviceAddress()
+        };
+        vkh::VkAccelerationStructureBuildGeometryInfoKHR buildInfo = {
+            .type = accelerationStructureType,
+            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+            .geometryCount = 1u,
+            .pGeometries = &geometryInfo,
+        };
+
+        // get acceleration structure size
+        vkh::VkAccelerationStructureBuildSizesInfoKHR sizes = {};
+        device->dispatch->GetAccelerationStructureBuildSizesKHR(VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, instanceCounts.data(), &sizes);
+
+        {   // create acceleration structure storage
+            auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+                .size = sizes.accelerationStructureSize,
+                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+            };
+            auto vmaCreateInfo = vkt::VmaMemoryInfo{
+                .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+                .instanceDispatch = instance->dispatch,
+                .deviceDispatch = device->dispatch
+            };
+            auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+            accelerationStructureBottomStorage = vkt::Vector<uint8_t>(allocation, 0ull, sizes.accelerationStructureSize, sizeof(uint8_t));
+        };
+
+        {   // create acceleration structure scratch
+            auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+                .size = sizes.buildScratchSize,
+                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+            };
+            auto vmaCreateInfo = vkt::VmaMemoryInfo{
+                .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+                .instanceDispatch = instance->dispatch,
+                .deviceDispatch = device->dispatch
+            };
+            auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+            accelerationStructureTopScratch = vkt::Vector<uint8_t>(allocation, 0ull, sizes.buildScratchSize, sizeof(uint8_t));
+        };
+
+        // create acceleration structure
+        vkh::VkAccelerationStructureCreateInfoKHR accelerationInfo = {};
+        accelerationInfo.type = accelerationStructureType;
+        accelerationInfo = accelerationStructureBottomStorage;
+
+        // currently, not available (driver or loader bug)
+        device->dispatch->CreateAccelerationStructureKHR(accelerationInfo, nullptr, &accelerationStructureTop);
+
+        //
+        buildInfo.dstAccelerationStructure = accelerationStructureTop;
+        buildInfo.scratchData = accelerationStructureTopScratch;
+
+        //
+        vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = {
+            .primitiveCount = instanceCounts[0]
+        };
+        std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = {
+            &rangesInfo
+        };
+
+        // needs command buffer execution
+        queue->submitOnce([&](VkCommandBuffer cmd) {
+            device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &buildInfo, rangeInfoPointers.data());
+        });
+    };
+
+
 
 
 
