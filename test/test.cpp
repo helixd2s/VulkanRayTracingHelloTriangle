@@ -9,7 +9,7 @@ void error(int errnum, const char* errmsg)
 };
 
 // 
-const uint32_t SCR_WIDTH = 800u, SCR_HEIGHT = 600u;
+const uint32_t SCR_WIDTH = 640u, SCR_HEIGHT = 360u;
 
 // 
 int main() {
@@ -66,36 +66,6 @@ int main() {
     auto viewport = vkh::VkViewport{ 0.0f, 0.0f, static_cast<float>(renderArea.extent.width), static_cast<float>(renderArea.extent.height), 0.f, 1.f };
 
 
-    // TODO: Inline Uniforms
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    auto pipusage = vkh::VkShaderStageFlags{ .eVertex = 1, .eGeometry = 1, .eFragment = 1, .eCompute = 1, .eRaygen = 1, .eAnyHit = 1, .eClosestHit = 1, .eMiss = 1 };
-    auto indexedf = vkh::VkDescriptorBindingFlags{ .eUpdateAfterBind = 1, .eUpdateUnusedWhilePending = 1, .ePartiallyBound = 1 };
-    auto dflags = vkh::VkDescriptorSetLayoutCreateFlags{ .eUpdateAfterBindPool = 1 };
-    std::vector<VkDescriptorSetLayout> layouts = {};
-    std::vector<vkh::VkPushConstantRange> ranges = { vkh::VkPushConstantRange{.stageFlags = pipusage, .offset = 0u, .size = 16u } };
-    vkh::handleVk(device->dispatch->CreatePipelineLayout(vkh::VkPipelineLayoutCreateInfo{  }.setSetLayouts(layouts).setPushConstantRanges(ranges), nullptr, &pipelineLayout));
-
-    // TODO: Descriptor Sets
-    std::vector<VkDescriptorSet> descriptorSets = {};
-
-
-    // 
-    vkh::VsGraphicsPipelineCreateInfoConstruction pipelineInfo = {};
-    pipelineInfo.stages = {
-        vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/render.vert.spv")), VK_SHADER_STAGE_VERTEX_BIT),
-        vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/render.frag.spv")), VK_SHADER_STAGE_FRAGMENT_BIT)
-    };
-    pipelineInfo.graphicsPipelineCreateInfo.layout = pipelineLayout;
-    pipelineInfo.graphicsPipelineCreateInfo.renderPass = renderPass;//context->refRenderPass();
-    pipelineInfo.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    pipelineInfo.viewportState.pViewports = &reinterpret_cast<::VkViewport&>(viewport);
-    pipelineInfo.viewportState.pScissors = &reinterpret_cast<::VkRect2D&>(renderArea);
-    pipelineInfo.colorBlendAttachmentStates = { {} }; // Default Blend State
-    pipelineInfo.dynamicStates = { VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT };
-
-    // 
-    VkPipeline finalPipeline = {};
-    vkh::handleVk(device->dispatch->CreateGraphicsPipelines(device->pipelineCache, 1u, pipelineInfo, nullptr, &finalPipeline));
 
 
 #define ENABLE_RAY_TRACING
@@ -341,14 +311,60 @@ int main() {
     };
 #endif
 
+    // create screen space
+    vkt::ImageRegion image = {};
+    {
+        // 
+        vkh::VkImageCreateInfo imageCreateInfo = {};
+        imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        imageCreateInfo.extent = vkh::VkExtent3D{ 1280, 720, 1 };
+        imageCreateInfo.mipLevels = 1u;
+        imageCreateInfo.arrayLayers = 1u;
+        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageCreateInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        // 
+        auto vmaCreateInfo = vkt::VmaMemoryInfo{
+            .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+            .instanceDispatch = instance->dispatch,
+            .deviceDispatch = device->dispatch
+        };
+
+        // 
+        vkh::VkImageViewCreateInfo imageViewCreateInfo = {};
+        imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        imageViewCreateInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        imageViewCreateInfo.components = vkh::VkComponentMapping{};
+        imageViewCreateInfo.subresourceRange = vkh::VkImageSubresourceRange{ .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0u, .levelCount = 1u, .baseArrayLayer = 0u, .layerCount = 1u };
+
+        // 
+        auto allocation = std::make_shared<vkt::VmaImageAllocation>(device->allocator, imageCreateInfo, vmaCreateInfo);
+        image = vkt::ImageRegion(allocation, imageViewCreateInfo);
+
+        // transfer image
+        queue->submitOnce([&](VkCommandBuffer cmd) {
+            image.transfer(cmd);
+        });
+    };
+
+
+
     //
     std::vector<uint64_t> addresses = {
         device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureTop))
     };
 
     //
-    VkPipelineLayout rtPipelineLayout = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSetLayout> rtLayouts = { VK_NULL_HANDLE };
+    auto pipusage = vkh::VkShaderStageFlags{ .eVertex = 1, .eGeometry = 1, .eFragment = 1, .eCompute = 1, .eRaygen = 1, .eAnyHit = 1, .eClosestHit = 1, .eMiss = 1 };
+    auto indexedf = vkh::VkDescriptorBindingFlags{ .eUpdateAfterBind = 1, .eUpdateUnusedWhilePending = 1, .ePartiallyBound = 1 };
+    auto dflags = vkh::VkDescriptorSetLayoutCreateFlags{ .eUpdateAfterBindPool = 1 };
+
+    //
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSetLayout> layouts = { VK_NULL_HANDLE };
 
     // create descriptor set layout
     vkh::VsDescriptorSetLayoutCreateInfoHelper descriptorSetLayoutHelper(vkh::VkDescriptorSetLayoutCreateInfo{});
@@ -358,22 +374,101 @@ int main() {
         .descriptorCount = uint32_t(addresses.size() * sizeof(uint64_t)), // TODO: fix descriptor counting
         .stageFlags = pipusage
     }, vkh::VkDescriptorBindingFlags{});
-    vkh::handleVk(device->dispatch->CreateDescriptorSetLayout(descriptorSetLayoutHelper.format(), nullptr, &rtLayouts[0]));
+    descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
+        .binding = 1u,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount = 1u, // TODO: fix descriptor counting
+        .stageFlags = pipusage
+    }, vkh::VkDescriptorBindingFlags{});
+    vkh::handleVk(device->dispatch->CreateDescriptorSetLayout(descriptorSetLayoutHelper.format(), nullptr, &layouts[0]));
 
     // create pipeline layout
     std::vector<vkh::VkPushConstantRange> rtRanges = { vkh::VkPushConstantRange{.stageFlags = pipusage, .offset = 0u, .size = 16u } };
-    vkh::handleVk(device->dispatch->CreatePipelineLayout(vkh::VkPipelineLayoutCreateInfo{  }.setSetLayouts(rtLayouts).setPushConstantRanges(rtRanges), nullptr, &rtPipelineLayout));
-    std::vector<VkDescriptorSet> rtDescriptorSets = { VK_NULL_HANDLE };
+    vkh::handleVk(device->dispatch->CreatePipelineLayout(vkh::VkPipelineLayoutCreateInfo{  }.setSetLayouts(layouts).setPushConstantRanges(rtRanges), nullptr, &pipelineLayout));
+    std::vector<VkDescriptorSet> descriptorSets = { VK_NULL_HANDLE };
 
     // create descriptor set
-    vkh::VsDescriptorSetCreateInfoHelper descriptorSetHelper(rtLayouts[0], device->descriptorPool);
+    vkh::VsDescriptorSetCreateInfoHelper descriptorSetHelper(layouts[0], device->descriptorPool);
     descriptorSetHelper.pushDescription<uint64_t>(vkh::VkDescriptorUpdateTemplateEntry{
         .dstBinding = 0u,
         .descriptorCount = uint32_t(addresses.size()),
         .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT
     }) = addresses[0];
+    descriptorSetHelper.pushDescription<vkh::VkDescriptorImageInfo>(vkh::VkDescriptorUpdateTemplateEntry{
+        .dstBinding = 1u,
+        .descriptorCount = 1u,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+    }) = image.getDescriptor();
     bool created = false;
-    vkh::AllocateDescriptorSetWithUpdate(device->dispatch, descriptorSetHelper, rtDescriptorSets[0], created);
+    vkh::AllocateDescriptorSetWithUpdate(device->dispatch, descriptorSetHelper, descriptorSets[0], created);
+
+
+
+
+    // create ray tracing pipeline
+    auto rayTracingPipelineHelper = vkh::VsRayTracingPipelineCreateInfoHelper(vkh::VkRayTracingPipelineCreateInfoKHR{
+        .maxPipelineRayRecursionDepth = 4u,
+        .layout = pipelineLayout
+    });
+
+    // ray tracing stages
+    rayTracingPipelineHelper.addShaderStages({ vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/ray-generation.rgen.spv")), VK_SHADER_STAGE_RAYGEN_BIT_KHR) }, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR);
+    rayTracingPipelineHelper.addShaderStages({ vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/ray-closest-hit.rchit.spv")), VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) }, VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR);
+    rayTracingPipelineHelper.addShaderStages({ vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/ray-miss.rmiss.spv")), VK_SHADER_STAGE_MISS_BIT_KHR) }, VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR);
+    rayTracingPipelineHelper.compileGroups();
+
+    //
+    VkPipeline rayTracingPipeline = {};
+    device->dispatch->CreateRayTracingPipelinesKHR(VK_NULL_HANDLE, device->pipelineCache, 1u, &rayTracingPipelineHelper.vkInfo, nullptr, &rayTracingPipeline);
+
+
+    // TODO: getting native size 
+    VkDeviceSize shaderGroundHandleSize = 32ull;
+
+    // sbt table buffer
+    vkt::Vector<uint8_t> sbtBuffer = {};
+    {   // instances
+        auto size = rayTracingPipelineHelper.groupCount() * shaderGroundHandleSize;
+        auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+            .size = size,
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR
+        };
+        auto vmaCreateInfo = vkt::VmaMemoryInfo{
+            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .instanceDispatch = instance->dispatch,
+            .deviceDispatch = device->dispatch
+        };
+        auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+        sbtBuffer = vkt::Vector<uint8_t>(allocation, 0ull, size, sizeof(uint8_t));
+        device->dispatch->GetRayTracingShaderGroupHandlesKHR(rayTracingPipeline, 0u, rayTracingPipelineHelper.groupCount(), size, sbtBuffer.mapped());
+    };
+
+    // TODO: deviceAddress operators
+    auto rayGenSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.raygenOffsetIndex(), .stride = shaderGroundHandleSize, .size = 1u * shaderGroundHandleSize };
+    auto hitSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.hitOffsetIndex(), .stride = shaderGroundHandleSize, .size = rayTracingPipelineHelper.hitShaderCount() * shaderGroundHandleSize };
+    auto missSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.missOffsetIndex(), .stride = shaderGroundHandleSize, .size = rayTracingPipelineHelper.missShaderCount() * shaderGroundHandleSize };
+
+
+
+    // graphics pipeline
+    vkh::VsGraphicsPipelineCreateInfoConstruction pipelineInfo = {};
+    pipelineInfo.stages = {
+        vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/render.vert.spv")), VK_SHADER_STAGE_VERTEX_BIT),
+        vkt::makePipelineStageInfo(device->dispatch, vkt::readBinary(std::string("./shaders/render.frag.spv")), VK_SHADER_STAGE_FRAGMENT_BIT)
+    };
+    pipelineInfo.graphicsPipelineCreateInfo.layout = pipelineLayout;
+    pipelineInfo.graphicsPipelineCreateInfo.renderPass = renderPass;//context->refRenderPass();
+    pipelineInfo.inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    pipelineInfo.viewportState.pViewports = &reinterpret_cast<::VkViewport&>(viewport);
+    pipelineInfo.viewportState.pScissors = &reinterpret_cast<::VkRect2D&>(renderArea);
+    pipelineInfo.colorBlendAttachmentStates = { {} }; // Default Blend State
+    pipelineInfo.dynamicStates = { VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT };
+
+    // 
+    VkPipeline finalPipeline = {};
+    vkh::handleVk(device->dispatch->CreateGraphicsPipelines(device->pipelineCache, 1u, pipelineInfo, nullptr, &finalPipeline));
+
+
 
 
 
@@ -436,7 +531,13 @@ int main() {
                 });
             };
 
-            // 
+            // ray tracing
+            device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, finalPipeline);
+            device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
+            device->dispatch->CmdTraceRaysKHR(commandBuffer, &rayGenSbt, &missSbt, &hitSbt, nullptr, 1280, 720, 1);
+            vkt::commandBarrier(device->dispatch, commandBuffer);
+
+            // rasterization
             device->dispatch->CmdBeginRenderPass(commandBuffer, vkh::VkRenderPassBeginInfo{ .renderPass = renderPass, .framebuffer = framebuffers[currentBuffer].frameBuffer, .renderArea = renderArea, .clearValueCount = 2u, .pClearValues = reinterpret_cast<vkh::VkClearValue*>(&clearValues[0]) }, VK_SUBPASS_CONTENTS_INLINE);
             device->dispatch->CmdSetViewport(commandBuffer, 0u, 1u, viewport);
             device->dispatch->CmdSetScissor(commandBuffer, 0u, 1u, renderArea);
