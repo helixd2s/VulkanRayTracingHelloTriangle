@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.17)
-project(vkt-test VERSION 0.1.0)
+project(vrtht VERSION 0.1.0)
 
 include(CTest)
 enable_testing()
@@ -21,6 +21,8 @@ file(
     LIST_DIRECTORIES false
     "${_src_root_path}/*/*.hpp*"
     "${_src_root_path}/*/*.h*"
+    "${_src_root_path}/*.hpp*"
+    "${_src_root_path}/*.h*"
 )
 
 foreach(_source IN ITEMS ${_source_list})

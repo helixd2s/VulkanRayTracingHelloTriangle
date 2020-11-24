@@ -97,6 +97,120 @@ int main() {
     VkPipeline finalPipeline = {};
     vkh::handleVk(device->dispatch->CreateGraphicsPipelines(device->pipelineCache, 1u, pipelineInfo, nullptr, &finalPipeline));
 
+
+
+
+
+    //
+    std::vector<uint16_t> indices = { 0, 1, 2 };
+    std::vector<glm::vec4> vertices = {
+        glm::vec4( 1.f, -1.f, -1.f, 1.f),
+        glm::vec4(-1.f, -1.f, -1.f, 1.f),
+        glm::vec4( 0.f,  1.f, -1.f, 1.f)
+    };
+    std::vector<uint32_t> primitiveCounts = { 1u };
+    std::vector<uint32_t> instanceCounts = { 1u };
+
+    //
+    vkt::Vector<uint16_t> indicesBuffer = {};
+    vkt::Vector<glm::vec4> verticesBuffer = {};
+
+    {   // vertices
+        auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+            .size = vertices.size() * sizeof(glm::vec4),
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+        };
+        auto vmaCreateInfo = vkt::VmaMemoryInfo{
+            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .instanceDispatch = instance->dispatch,
+            .deviceDispatch = device->dispatch
+        };
+        auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+        verticesBuffer = vkt::Vector<glm::vec4>(allocation, 0ull, vertices.size() * sizeof(glm::vec4), sizeof(glm::vec4));
+        memcpy(verticesBuffer.map(), vertices.data(), vertices.size() * sizeof(glm::vec4));
+    }
+
+    {   // indices
+        auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+            .size = indices.size() * sizeof(uint16_t),
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+        };
+        auto vmaCreateInfo = vkt::VmaMemoryInfo{
+            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .instanceDispatch = instance->dispatch,
+            .deviceDispatch = device->dispatch
+        };
+        auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+        indicesBuffer = vkt::Vector<uint16_t>(allocation, 0ull, indices.size() * sizeof(uint16_t), sizeof(uint16_t));
+        memcpy(indicesBuffer.map(), indices.data(), indices.size() * sizeof(uint16_t));
+    }
+
+    // bottom levels
+    vkt::Vector<uint8_t> accelerationStructureBottomScratch = {};
+    vkt::Vector<uint8_t> accelerationStructureBottomStorage = {};
+    VkAccelerationStructureKHR accelerationStructureBottom = VK_NULL_HANDLE;
+    {
+        auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR;//VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+        vkh::VkAccelerationStructureGeometryKHR geometryInfo = {
+            .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+            .geometry = vkh::VkAccelerationStructureGeometryTrianglesDataKHR{
+                .vertexFormat = VK_FORMAT_R32G32B32A32_SFLOAT,
+                .vertexData = verticesBuffer.deviceAddress(),
+                .vertexStride = sizeof(glm::vec4),
+                .maxVertex = 3u,
+                .indexType = VK_INDEX_TYPE_UINT16,
+                .indexData = indicesBuffer.deviceAddress(),
+                .transformData = 0ull
+            },
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
+        };
+        vkh::VkAccelerationStructureBuildGeometryInfoKHR buildInfo = {
+            .type = accelerationStructureType,
+            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+            .geometryCount = 1u,
+            .pGeometries = &geometryInfo,
+        };
+
+        // get acceleration structure size
+        vkh::VkAccelerationStructureBuildSizesInfoKHR sizes = {};
+        device->dispatch->GetAccelerationStructureBuildSizesKHR(VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, primitiveCounts.data(), &sizes);
+
+        {   // create acceleration structure storage
+            auto bufferCreateInfo = vkh::VkBufferCreateInfo{
+                .size = sizes.accelerationStructureSize,
+                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+            };
+            auto vmaCreateInfo = vkt::VmaMemoryInfo{
+                .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+                .instanceDispatch = instance->dispatch,
+                .deviceDispatch = device->dispatch
+            };
+            auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
+            accelerationStructureBottomStorage = vkt::Vector<uint8_t>(allocation, 0ull, sizes.accelerationStructureSize, sizeof(uint8_t));
+        };
+
+        // create acceleration structure
+        vkh::VkAccelerationStructureCreateInfoKHR accelerationInfo = {};
+        accelerationInfo.type = accelerationStructureType;
+        accelerationInfo = accelerationStructureBottomStorage;
+
+        // currently, not available (driver or loader bug)
+        device->dispatch->CreateAccelerationStructureKHR(accelerationInfo, nullptr, &accelerationStructureBottom);
+
+        // needs command buffer execution
+        queue->submitOnce([&](VkCommandBuffer cmd) {
+            //device->dispatch->BuildAccelerationStructuresKHR();
+        });
+    };
+
+    ////
+    // TODO: Top, Instance Level 
+    ////
+
+
+
     // 
     int64_t currSemaphore = -1;
     uint32_t currentBuffer = 0u;
