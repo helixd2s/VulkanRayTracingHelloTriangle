@@ -98,9 +98,8 @@ int main() {
     vkh::handleVk(device->dispatch->CreateGraphicsPipelines(device->pipelineCache, 1u, pipelineInfo, nullptr, &finalPipeline));
 
 
-
-
-
+#define ENABLE_RAY_TRACING
+#ifdef ENABLE_RAY_TRACING
     //
     std::vector<uint16_t> indices = { 0, 1, 2 };
     std::vector<glm::vec4> vertices = {
@@ -340,7 +339,12 @@ int main() {
             device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &buildInfo, rangeInfoPointers.data());
         });
     };
+#endif
 
+    //
+    std::vector<uint64_t> addresses = {
+        device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureTop))
+    };
 
     //
     VkPipelineLayout rtPipelineLayout = VK_NULL_HANDLE;
@@ -351,7 +355,7 @@ int main() {
     descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
         .binding = 0u,
         .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
-        .descriptorCount = 1u,
+        .descriptorCount = uint32_t(addresses.size() * sizeof(uint64_t)), // TODO: fix descriptor counting
         .stageFlags = pipusage
     }, vkh::VkDescriptorBindingFlags{});
     vkh::handleVk(device->dispatch->CreateDescriptorSetLayout(descriptorSetLayoutHelper.format(), nullptr, &rtLayouts[0]));
@@ -363,16 +367,11 @@ int main() {
 
     // create descriptor set
     vkh::VsDescriptorSetCreateInfoHelper descriptorSetHelper(rtLayouts[0], device->descriptorPool);
-    vkh::VsDescriptorHandle<vkh::VkWriteDescriptorSetInlineUniformBlockEXT> accelerationStructureHandle = descriptorSetHelper.pushDescription(vkh::VkDescriptorUpdateTemplateEntry{
+    descriptorSetHelper.pushDescription<uint64_t>(vkh::VkDescriptorUpdateTemplateEntry{
         .dstBinding = 0u,
-        .descriptorCount = 1u,
-        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
-        .stride = sizeof(vkh::VkWriteDescriptorSetInlineUniformBlockEXT)
-    });
-    std::vector<uint64_t> addresses = {
-        device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureTop))
-    };
-    accelerationStructureHandle->setData(addresses);
+        .descriptorCount = uint32_t(addresses.size()),
+        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT
+    }) = addresses[0];
     bool created = false;
     vkh::AllocateDescriptorSetWithUpdate(device->dispatch, descriptorSetHelper, rtDescriptorSets[0], created);
 

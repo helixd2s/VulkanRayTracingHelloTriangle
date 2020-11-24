@@ -1,5 +1,13 @@
 {
     "files.associations": {
-        "vector": "cpp"
+        "vector": "cpp",
+        "array": "cpp",
+        "initializer_list": "cpp",
+        "list": "cpp",
+        "regex": "cpp",
+        "type_traits": "cpp",
+        "xhash": "cpp",
+        "xstring": "cpp",
+        "xutility": "cpp"
     }
 }
