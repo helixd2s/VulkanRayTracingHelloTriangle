@@ -67,9 +67,6 @@ int main() {
 
 
 
-
-#define ENABLE_RAY_TRACING
-#ifdef ENABLE_RAY_TRACING
     //
     std::vector<uint16_t> indices = { 0, 1, 2 };
     std::vector<glm::vec4> vertices = {
@@ -121,34 +118,31 @@ int main() {
     vkt::Vector<uint8_t> accelerationStructureBottomScratch = {};
     vkt::Vector<uint8_t> accelerationStructureBottomStorage = {};
     VkAccelerationStructureKHR accelerationStructureBottom = VK_NULL_HANDLE;
-
-
-    // 
-    vkh::VkAccelerationStructureGeometryKHR triangleGeometryInfo = {
-        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .geometry = {},
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-    triangleGeometryInfo.triangles = vkh::VkAccelerationStructureGeometryTrianglesDataKHR{
-        .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-        .vertexData = verticesBuffer.deviceAddress(),
-        .vertexStride = sizeof(glm::vec4),
-        .maxVertex = 3u,
-        .indexType = VK_INDEX_TYPE_NONE_KHR,
-        .indexData = 0ull,
-        .transformData = 0ull
-    };
-    vkh::VkAccelerationStructureBuildGeometryInfoKHR triangleBuildInfo = {
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1u,
-        .pGeometries = &triangleGeometryInfo,
-    };
-
+    vkh::VkAccelerationStructureDeviceAddressInfoKHR deviceAddressInfo = {};
 
     {
         auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        //auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR;
+        vkh::VkAccelerationStructureGeometryKHR triangleGeometryInfo = {
+            .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
+        };
+        triangleGeometryInfo.geometry = vkh::VkAccelerationStructureGeometryTrianglesDataKHR{
+            .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+            .vertexData = verticesBuffer.deviceAddress(),
+            .vertexStride = sizeof(glm::vec4),
+            .maxVertex = 3u,
+            .indexType = VK_INDEX_TYPE_UINT16,
+            .indexData = indicesBuffer.deviceAddress(),
+            .transformData = 0ull
+        };
+        vkh::VkAccelerationStructureBuildGeometryInfoKHR triangleBuildInfo = {
+            .type = accelerationStructureType,
+            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+            .geometryCount = 1u,
+            .pGeometries = &triangleGeometryInfo,
+        };
 
         // get acceleration structure size
         vkh::VkAccelerationStructureBuildSizesInfoKHR sizes = {};
@@ -171,7 +165,7 @@ int main() {
         {   // create acceleration structure scratch
             auto bufferCreateInfo = vkh::VkBufferCreateInfo{
                 .size = sizes.buildScratchSize,
-                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
             };
             auto vmaCreateInfo = vkt::VmaMemoryInfo{
                 .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
@@ -191,20 +185,20 @@ int main() {
         device->dispatch->CreateAccelerationStructureKHR(accelerationInfo, nullptr, &accelerationStructureBottom);
 
         //
-        triangleBuildInfo.srcAccelerationStructure = accelerationStructureBottom;
         triangleBuildInfo.dstAccelerationStructure = accelerationStructureBottom;
         triangleBuildInfo.scratchData = accelerationStructureBottomScratch;
 
 
         // needs command buffer execution
-        //queue->submitOnce([&](VkCommandBuffer cmd) {
-        //    device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &triangleBuildInfo, rangeInfoPointers.data());
-        //});
+        queue->submitOnce([&](VkCommandBuffer commandBuffer) {
+            vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = { .primitiveCount = primitiveCounts[0] };
+            std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = { &rangesInfo };
+            device->dispatch->CmdBuildAccelerationStructuresKHR(commandBuffer, 1u, &triangleBuildInfo, rangeInfoPointers.data()); // fix critically
+        });
     };
 
 
     // top, instance levels
-    vkh::VkAccelerationStructureDeviceAddressInfoKHR deviceAddressInfo = {};
     std::vector<::VkAccelerationStructureInstanceKHR> instances = {
         vkh::VkAccelerationStructureInstanceKHR{
             .accelerationStructureReference = device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureBottom))
@@ -227,24 +221,6 @@ int main() {
         memcpy(instancesBuffer.map(), instances.data(), size);
     };
 
-
-    // 
-    vkh::VkAccelerationStructureGeometryKHR instanceGeometryInfo = {
-        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry = {},
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-    instanceGeometryInfo.geometry = vkh::VkAccelerationStructureGeometryInstancesDataKHR{
-        .data = instancesBuffer.deviceAddress()
-    };
-    vkh::VkAccelerationStructureBuildGeometryInfoKHR instanceBuildInfo = {
-        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1u,
-        .pGeometries = &instanceGeometryInfo,
-    };
-
     // top levels
     vkt::Vector<uint8_t> accelerationStructureTopScratch = {};
     vkt::Vector<uint8_t> accelerationStructureTopStorage = {};
@@ -252,7 +228,20 @@ int main() {
     {
         auto accelerationStructureType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
 
-        
+        vkh::VkAccelerationStructureGeometryKHR instanceGeometryInfo = {
+            .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
+        };
+        instanceGeometryInfo.geometry = vkh::VkAccelerationStructureGeometryInstancesDataKHR{
+            .data = instancesBuffer.deviceAddress()
+        };
+        vkh::VkAccelerationStructureBuildGeometryInfoKHR instanceBuildInfo = {
+            .type = accelerationStructureType,
+            .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+            .geometryCount = 1u,
+            .pGeometries = &instanceGeometryInfo,
+        };
 
         // get acceleration structure size
         vkh::VkAccelerationStructureBuildSizesInfoKHR sizes = {};
@@ -275,7 +264,7 @@ int main() {
         {   // create acceleration structure scratch
             auto bufferCreateInfo = vkh::VkBufferCreateInfo{
                 .size = sizes.buildScratchSize,
-                .usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
             };
             auto vmaCreateInfo = vkt::VmaMemoryInfo{
                 .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
@@ -295,19 +284,18 @@ int main() {
         device->dispatch->CreateAccelerationStructureKHR(accelerationInfo, nullptr, &accelerationStructureTop);
 
         //
-        instanceBuildInfo.srcAccelerationStructure = accelerationStructureTop;
         instanceBuildInfo.dstAccelerationStructure = accelerationStructureTop;
         instanceBuildInfo.scratchData = accelerationStructureTopScratch;
 
-
-
         // needs command buffer execution
-        //queue->submitOnce([&](VkCommandBuffer cmd) {
-        //    device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &instanceBuildInfo, rangeInfoPointers.data());
-        //});
+        queue->submitOnce([&](VkCommandBuffer commandBuffer) {
+            vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = { .primitiveCount = instanceCounts[0] };
+            std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = { &rangesInfo };
+            device->dispatch->CmdBuildAccelerationStructuresKHR(commandBuffer, 1u, &instanceBuildInfo, rangeInfoPointers.data()); // fix critically
+        });
     };
-#endif
 
+    /*
     // create screen space
     vkt::ImageRegion image = {};
     {
@@ -346,7 +334,7 @@ int main() {
             image.transfer(cmd);
         });
     };
-
+    */
 
 
     //
@@ -354,29 +342,32 @@ int main() {
         device->dispatch->GetAccelerationStructureDeviceAddressKHR(&(deviceAddressInfo = accelerationStructureTop))
     };
 
+
     //
     auto pipusage = vkh::VkShaderStageFlags{ .eVertex = 1, .eGeometry = 1, .eFragment = 1, .eCompute = 1, .eRaygen = 1, .eAnyHit = 1, .eClosestHit = 1, .eMiss = 1 };
     auto indexedf = vkh::VkDescriptorBindingFlags{ .eUpdateAfterBind = 1, .eUpdateUnusedWhilePending = 1, .ePartiallyBound = 1 };
     auto dflags = vkh::VkDescriptorSetLayoutCreateFlags{ .eUpdateAfterBindPool = 1 };
 
+
     //
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     std::vector<VkDescriptorSetLayout> layouts = { VK_NULL_HANDLE };
+
 
     // create descriptor set layout
     vkh::VsDescriptorSetLayoutCreateInfoHelper descriptorSetLayoutHelper(vkh::VkDescriptorSetLayoutCreateInfo{});
     descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
         .binding = 0u,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-        .descriptorCount = 1u, // TODO: fix descriptor counting
+        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
+        .descriptorCount = uint32_t(addresses.size() * sizeof(uint64_t)), // TODO: fix descriptor counting
         .stageFlags = pipusage
     }, vkh::VkDescriptorBindingFlags{});
-    descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
+    /*descriptorSetLayoutHelper.pushBinding(vkh::VkDescriptorSetLayoutBinding{
         .binding = 1u,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         .descriptorCount = 1u, // TODO: fix descriptor counting
         .stageFlags = pipusage
-    }, vkh::VkDescriptorBindingFlags{});
+    }, vkh::VkDescriptorBindingFlags{});*/
     vkh::handleVk(device->dispatch->CreateDescriptorSetLayout(descriptorSetLayoutHelper.format(), nullptr, &layouts[0]));
 
     // create pipeline layout
@@ -386,16 +377,16 @@ int main() {
 
     // create descriptor set
     vkh::VsDescriptorSetCreateInfoHelper descriptorSetHelper(layouts[0], device->descriptorPool);
-    descriptorSetHelper.pushDescription<VkAccelerationStructureKHR>(vkh::VkDescriptorUpdateTemplateEntry{
+    descriptorSetHelper.pushDescription<uint64_t>(vkh::VkDescriptorUpdateTemplateEntry{
         .dstBinding = 0u,
-        .descriptorCount = 1u,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-    }) = accelerationStructureTop; //= addresses[0];
-    descriptorSetHelper.pushDescription<vkh::VkDescriptorImageInfo>(vkh::VkDescriptorUpdateTemplateEntry{
+        .descriptorCount = uint32_t(addresses.size()),
+        .descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT
+    }) = addresses[0];
+    /*descriptorSetHelper.pushDescription<vkh::VkDescriptorImageInfo>(vkh::VkDescriptorUpdateTemplateEntry{
         .dstBinding = 1u,
         .descriptorCount = 1u,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-    }) = image.getDescriptor();
+    }) = image.getDescriptor();*/
     bool created = false;
     vkh::AllocateDescriptorSetWithUpdate(device->dispatch, descriptorSetHelper, descriptorSets[0], created);
 
@@ -446,8 +437,8 @@ int main() {
     auto missSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroupHandleSize * rayTracingPipelineHelper.missOffsetIndex(), .stride = shaderGroupHandleSize, .size = rayTracingPipelineHelper.missShaderCount() * shaderGroupHandleSize };
     */
 
-    // create simply compute shader for ray tracing
-    auto rayQueryPipeline = vkt::createCompute(device->dispatch, std::string("./shaders/ray-query.comp.spv"), pipelineLayout, device->pipelineCache, 32u);
+    // create simply compute shader for ray tracing (not needed due fragment shader)
+    //auto rayQueryPipeline = vkt::createCompute(device->dispatch, std::string("./shaders/ray-query.comp.spv"), pipelineLayout, device->pipelineCache, 32u);
 
 
 
@@ -530,20 +521,6 @@ int main() {
                 });
             };
 
-            {   //
-                vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = { .primitiveCount = primitiveCounts[0] };
-                std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = { &rangesInfo };
-                device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &triangleBuildInfo, rangeInfoPointers.data());
-            };
-            vkt::commandBarrier(device->dispatch, commandBuffer);
-
-            {   //
-                vkh::VkAccelerationStructureBuildRangeInfoKHR rangesInfo = { .primitiveCount = instanceCounts[0] };
-                std::vector<::VkAccelerationStructureBuildRangeInfoKHR*> rangeInfoPointers = { &rangesInfo };
-                device->dispatch->BuildAccelerationStructuresKHR(VK_NULL_HANDLE, 1u, &instanceBuildInfo, rangeInfoPointers.data());
-            };
-            vkt::commandBarrier(device->dispatch, commandBuffer);
-
             // ray tracing
             //device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipeline);
             //device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
@@ -551,10 +528,10 @@ int main() {
             //vkt::commandBarrier(device->dispatch, commandBuffer);
 
             // ray query hack
-            device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, rayQueryPipeline);
-            device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
-            device->dispatch->CmdDispatch(commandBuffer, 1280u/32u, 720u/4u, 1u);
-            vkt::commandBarrier(device->dispatch, commandBuffer);
+            //device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, rayQueryPipeline);
+            //device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
+            //device->dispatch->CmdDispatch(commandBuffer, 1280u/32u, 720u/4u, 1u);
+            //vkt::commandBarrier(device->dispatch, commandBuffer);
 
             // rasterization
             device->dispatch->CmdBeginRenderPass(commandBuffer, vkh::VkRenderPassBeginInfo{ .renderPass = renderPass, .framebuffer = framebuffers[currentBuffer].frameBuffer, .renderArea = renderArea, .clearValueCount = 2u, .pClearValues = reinterpret_cast<vkh::VkClearValue*>(&clearValues[0]) }, VK_SUBPASS_CONTENTS_INLINE);

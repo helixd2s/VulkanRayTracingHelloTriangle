@@ -21,13 +21,13 @@ void main() {
     uint sbtStride = 0;
     uint missIndex = 0;
 
-    payload = vec4(0.3);
-    //traceRayEXT(
-    //  accelerationStructureEXT(acc), gl_RayFlagsOpaqueEXT, 0xff,
-    //  sbtOffset, sbtStride, missIndex,
-    //  rayOrigin, 0.001, rayDir, 100.0,
-    //  0
-    //);
+    payload = vec4(0.3f,0.3f,0.3f,1.f);
+    traceRayEXT(
+      accelerationStructureEXT(acc), gl_RayFlagsOpaqueEXT, 0xff,
+      sbtOffset, sbtStride, missIndex,
+      rayOrigin, 0.001, rayDir, 100.0,
+      0
+    );
 
     imageStore(img, ivec2(gl_LaunchIDEXT), payload);
 }
