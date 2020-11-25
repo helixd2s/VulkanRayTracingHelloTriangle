@@ -404,7 +404,7 @@ int main() {
 
 
 
-
+    /*
     // create ray tracing pipeline
     auto rayTracingPipelineHelper = vkh::VsRayTracingPipelineCreateInfoHelper(vkh::VkRayTracingPipelineCreateInfoKHR{
         .maxPipelineRayRecursionDepth = 4u,
@@ -423,12 +423,12 @@ int main() {
 
 
     // TODO: getting native size 
-    VkDeviceSize shaderGroundHandleSize = 32ull;
+    VkDeviceSize shaderGroupHandleSize = 32ull;
 
     // sbt table buffer
     vkt::Vector<uint8_t> sbtBuffer = {};
     {   // instances
-        auto size = rayTracingPipelineHelper.groupCount() * shaderGroundHandleSize;
+        auto size = rayTracingPipelineHelper.groupCount() * shaderGroupHandleSize;
         auto bufferCreateInfo = vkh::VkBufferCreateInfo{
             .size = size,
             .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR
@@ -444,9 +444,13 @@ int main() {
     };
 
     // TODO: deviceAddress operators
-    auto rayGenSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.raygenOffsetIndex(), .stride = shaderGroundHandleSize, .size = 1u * shaderGroundHandleSize };
-    auto hitSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.hitOffsetIndex(), .stride = shaderGroundHandleSize, .size = rayTracingPipelineHelper.hitShaderCount() * shaderGroundHandleSize };
-    auto missSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroundHandleSize * rayTracingPipelineHelper.missOffsetIndex(), .stride = shaderGroundHandleSize, .size = rayTracingPipelineHelper.missShaderCount() * shaderGroundHandleSize };
+    auto rayGenSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroupHandleSize * rayTracingPipelineHelper.raygenOffsetIndex(), .stride = shaderGroupHandleSize, .size = 1u * shaderGroupHandleSize };
+    auto hitSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroupHandleSize * rayTracingPipelineHelper.hitOffsetIndex(), .stride = shaderGroupHandleSize, .size = rayTracingPipelineHelper.hitShaderCount() * shaderGroupHandleSize };
+    auto missSbt = vkh::VkStridedDeviceAddressRegionKHR{ .deviceAddress = sbtBuffer.deviceAddress().deviceAddress + shaderGroupHandleSize * rayTracingPipelineHelper.missOffsetIndex(), .stride = shaderGroupHandleSize, .size = rayTracingPipelineHelper.missShaderCount() * shaderGroupHandleSize };
+    */
+
+    // create simply compute shader for ray tracing
+    auto rayQueryPipeline = vkt::createCompute(device->dispatch, std::string("./shaders/ray-query.comp.spv"), pipelineLayout, device->pipelineCache, 32u);
 
 
 
@@ -532,9 +536,15 @@ int main() {
             };
 
             // ray tracing
-            device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, finalPipeline);
-            device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
-            device->dispatch->CmdTraceRaysKHR(commandBuffer, &rayGenSbt, &missSbt, &hitSbt, nullptr, 1280, 720, 1);
+            //device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rayTracingPipeline);
+            //device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
+            //device->dispatch->CmdTraceRaysKHR(commandBuffer, &rayGenSbt, &missSbt, &hitSbt, nullptr, 1280, 720, 1);
+            //vkt::commandBarrier(device->dispatch, commandBuffer);
+
+            // ray query hack
+            device->dispatch->CmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, rayQueryPipeline);
+            device->dispatch->CmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0u, descriptorSets.size(), descriptorSets.data(), 0u, nullptr);
+            device->dispatch->CmdDispatch(commandBuffer, 1280u/32u, 720u/4u, 1u);
             vkt::commandBarrier(device->dispatch, commandBuffer);
 
             // rasterization
