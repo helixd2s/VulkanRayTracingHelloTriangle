@@ -18,9 +18,9 @@ void main() {
   vec3 rayDir = normalize(vec3(d.x * aspectRatio, d.y, 1));
   
   vec4 payload = vec4(0.3f.xxx, 1.f);
-  /*
+  
   rayQueryEXT rayQuery;
-  rayQueryInitializeEXT(rayQuery, accelerationStructureEXT(acc), gl_RayFlagsTerminateOnFirstHitEXT, 0xff, rayOrigin, 0.001, rayDir, 100.0);
+  rayQueryInitializeEXT(rayQuery, accelerationStructureEXT(acc), gl_RayFlagsTerminateOnFirstHitEXT|gl_RayFlagsOpaqueEXT, 0xff, rayOrigin, 0.001, rayDir, 100.0);
   
   while(rayQueryProceedEXT(rayQuery)) {
     rayQueryConfirmIntersectionEXT(rayQuery);
@@ -29,7 +29,7 @@ void main() {
   if (rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
     vec2 attribs = rayQueryGetIntersectionBarycentricsEXT(rayQuery, true);
     payload = vec4(1.f - attribs.x - attribs.y, attribs.x, attribs.y, 1.f);
-  }*/
+  }
   
   imageStore(img, ivec2(gl_GlobalInvocationID.xy), payload);
 }
