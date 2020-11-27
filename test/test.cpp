@@ -85,33 +85,35 @@ int main() {
         auto size = vertices.size() * sizeof(glm::vec4);
         auto bufferCreateInfo = vkh::VkBufferCreateInfo{
             .size = size,
-            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
         };
         auto vmaCreateInfo = vkt::VmaMemoryInfo{
-            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
             .instanceDispatch = instance->dispatch,
             .deviceDispatch = device->dispatch
         };
         auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
         verticesBuffer = vkt::Vector<glm::vec4>(allocation, 0ull, size, sizeof(glm::vec4));
-        memcpy(verticesBuffer.map(), vertices.data(), size);
-    }
+        //memcpy(verticesBuffer.map(), vertices.data(), size);
+        queue->uploadIntoBuffer(verticesBuffer, vertices.data(), size); // use internal cache for upload buffer
+    };
 
     {   // indices
         auto size = indices.size() * sizeof(uint16_t);
         auto bufferCreateInfo = vkh::VkBufferCreateInfo{
             .size = size,
-            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
         };
         auto vmaCreateInfo = vkt::VmaMemoryInfo{
-            .memUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+            .memUsage = VMA_MEMORY_USAGE_GPU_ONLY,
             .instanceDispatch = instance->dispatch,
             .deviceDispatch = device->dispatch
         };
         auto allocation = std::make_shared<vkt::VmaBufferAllocation>(device->allocator, bufferCreateInfo, vmaCreateInfo);
         indicesBuffer = vkt::Vector<uint16_t>(allocation, 0ull, size, sizeof(uint16_t));
-        memcpy(indicesBuffer.map(), indices.data(), size);
-    }
+        //memcpy(indicesBuffer.map(), indices.data(), size);
+        queue->uploadIntoBuffer(indicesBuffer, indices.data(), size); // use internal cache for upload buffer
+    };
 
 
     // bottom levels
